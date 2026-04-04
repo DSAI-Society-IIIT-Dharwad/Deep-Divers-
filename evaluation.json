@@ -1,0 +1,10 @@
+{
+  "episodes": 10,
+  "success_rate": 0.0,
+  "collision_rate": 0.0,
+  "avg_steps_to_goal": 0.0,
+  "avg_episode_reward": -12.500000000000043,
+  "mean_reward": -12.5,
+  "max_reward": -12.5,
+  "min_reward": -12.5
+}

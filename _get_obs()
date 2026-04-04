@@ -1,0 +1,2 @@
+def _get_obs(self):
+    return np.concatenate(([self.robot_x, self.robot_y], self.lidar))

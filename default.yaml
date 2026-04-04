@@ -1,0 +1,18 @@
+environment:
+  name: mock
+  params:
+    goal: [5.0, 5.0]
+    world_size: 6.0
+    max_steps: 250
+    obstacles:
+      - [2.0, 2.0]
+      - [3.0, 1.5]
+      - [1.5, 3.5]
+      - [4.0, 3.0]
+
+training:
+  algorithm: ppo
+  timesteps: 20000
+  model_path: models/ppo_model
+  checkpoint_path: models/checkpoints/ppo_checkpoint
+  log_every: 1000

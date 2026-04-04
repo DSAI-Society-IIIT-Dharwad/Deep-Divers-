@@ -1,0 +1,16 @@
+def reset(self, seed=None, options=None):
+    super().reset(seed=seed)
+
+    self.robot_x = 100
+    self.robot_y = 100
+
+    self.goal_x = 700
+    self.goal_y = 500
+
+    self.prev_distance = None
+    self.collision_flag = False
+
+    self.lidar = np.ones(10) * 300
+
+    obs = self._get_obs()
+    return obs, {}
