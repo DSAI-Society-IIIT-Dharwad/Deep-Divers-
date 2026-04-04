@@ -1,0 +1,9 @@
+gymnasium>=0.29
+numpy>=1.24
+pygame>=2.5
+PyYAML>=6.0
+stable-baselines3>=2.3
+pytest>=8.0
+
+# Optional when using the ros2_gazebo environment.
+rclpy; platform_system != "Windows"
