@@ -1,200 +1,263 @@
 import pygame
+import sys
+import math
 import random
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
 
 pygame.init()
 
 # ---------------- SCREEN ----------------
 WIDTH, HEIGHT = 500, 500
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("VBots DQN Simulation")
+pygame.display.set_caption("VBots - Store Pickup Simulation")
 
 clock = pygame.time.Clock()
 
 # ---------------- COLORS ----------------
 GRASS = (70, 170, 90)
-ROAD = (50, 50, 50)
-LANES = (220, 220, 220)
+ROAD = (45, 45, 45)
+LANE = (230, 230, 230)
 
-SHOP = (200, 200, 210)
-GOAL_COLOR = (0, 255, 180)
-ROBOT_COLOR = (180, 180, 200)
-CAR_COLOR = (220, 60, 60)
+ROBOT = (200, 200, 210)
+ROBOT_DARK = (120, 120, 130)
+
 SENSOR = (0, 255, 255)
 
-# ---------------- ENV ----------------
+STORE_WALL = (210, 210, 215)
+STORE_ROOF = (170, 170, 180)
+GLASS = (160, 220, 255)
+
+GOAL_COLOR = (0, 255, 180)
+
+CAR1 = (220, 60, 60)
+CAR2 = (60, 120, 255)
+
+# ---------------- ROAD ----------------
 ROAD_X = 200
 ROAD_W = 100
 
-shop = (60, 420)
-goal = (430, 60)
+# ---------------- STORE (POINT A) ----------------
+store_x, store_y = 40, 380
+STORE_W, STORE_H = 120, 90
 
-cars = [
-    pygame.Rect(210, 0, 40, 20),
-    pygame.Rect(270, 250, 40, 20),
+# ---------------- ITEMS (DIFFERENTIABLE) ----------------
+ITEMS = [
+    {"name": "Bottle", "color": (80, 180, 255), "shape": "rect"},
+    {"name": "Apple", "color": (255, 80, 80), "shape": "circle"},
+    {"name": "Box", "color": (200, 140, 80), "shape": "square"}
 ]
 
-# ---------------- DQN ----------------
-class DQN(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(4, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 4)
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-model = DQN()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-loss_fn = nn.MSELoss()
+current_item = random.choice(ITEMS)
 
 # ---------------- ROBOT ----------------
 x, y = 60.0, 60.0
+speed = 2.6
 has_item = False
 
+ROBOT_SIZE = 22
+
+goal = (430, 60)
+
+# ---------------- CARS ----------------
+cars = [
+    {"x": ROAD_X + 10, "y": 80, "v": 2.0, "color": CAR1},
+    {"x": ROAD_X + 55, "y": 250, "v": -2.2, "color": CAR2}
+]
+
+# ---------------- HELPERS ----------------
 def robot_rect():
-    return pygame.Rect(int(x), int(y), 20, 20)
+    return pygame.Rect(int(x), int(y), ROBOT_SIZE, ROBOT_SIZE)
 
-# ---------------- STATE ----------------
-def get_state():
-    return np.array([
-        x / WIDTH,
-        y / HEIGHT,
-        (shop[0] - x) / WIDTH,
-        (goal[0] - x) / WIDTH
-    ], dtype=np.float32)
+def store_rect():
+    return pygame.Rect(store_x, store_y, STORE_W, STORE_H)
 
-# ---------------- ACTION ----------------
-def act(state):
-    if random.random() < 0.2:
-        return random.randint(0, 3)
-
-    with torch.no_grad():
-        q = model(torch.tensor(state))
-        return torch.argmax(q).item()
-
-# ---------------- MOVE ----------------
-def move(action):
+# ---------------- ROBOT MOVE ----------------
+def move_robot(target):
     global x, y
-    if action == 0: y -= 5
-    if action == 1: y += 5
-    if action == 2: x -= 5
-    if action == 3: x += 5
 
-# ---------------- TRAIN ----------------
-def train(s, a, r, ns):
-    s = torch.tensor(s)
-    ns = torch.tensor(ns)
+    dx = target[0] - x
+    dy = target[1] - y
 
-    q = model(s)
-    q_next = model(ns)
+    dist = math.hypot(dx, dy)
+    if dist > 0:
+        dx /= dist
+        dy /= dist
 
-    target = q.clone().detach()
-    target[a] = r + 0.95 * torch.max(q_next)
+    x += dx * speed
+    y += dy * speed
 
-    loss = loss_fn(q, target)
+# ---------------- CARS ----------------
+def move_cars():
+    for c in cars:
+        c["y"] += c["v"]
+        if c["y"] > HEIGHT:
+            c["y"] = -30
+        if c["y"] < -30:
+            c["y"] = HEIGHT
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-# ---------------- REWARD ----------------
-def reward(crash, picked, done):
-    if crash:
-        return -50
-    if picked:
-        return 10
-    if done:
-        return 20
-    return -0.1
-
-# ---------------- COLLISION ----------------
-def crash_check():
+def car_collision():
     rr = robot_rect()
     for c in cars:
-        if rr.colliderect(c):
+        car_rect = pygame.Rect(c["x"], c["y"], 35, 18)
+        if rr.colliderect(car_rect):
             return True
     return False
 
-# ---------------- DRAW ----------------
-def draw():
+# ---------------- SMALL SENSORS ----------------
+def draw_sensors():
+    sx = x + ROBOT_SIZE // 2
+    sy = y + ROBOT_SIZE // 2
+
+    # SMALL sensors only 15px
+    for angle in [-25, 0, 25]:
+        rad = math.radians(angle)
+        ex = sx + math.cos(rad) * 15
+        ey = sy + math.sin(rad) * 15
+
+        pygame.draw.line(screen, SENSOR, (sx, sy), (ex, ey), 1)
+        pygame.draw.circle(screen, SENSOR, (int(ex), int(ey)), 2)
+
+# ---------------- STORE DRAW ----------------
+def draw_store():
+    rect = store_rect()
+
+    # walls
+    pygame.draw.rect(screen, STORE_WALL, rect, border_radius=8)
+
+    # roof
+    pygame.draw.polygon(screen, STORE_ROOF, [
+        (rect.x, rect.y),
+        (rect.x + rect.w // 2, rect.y - 20),
+        (rect.x + rect.w, rect.y)
+    ])
+
+    # glass front
+    pygame.draw.rect(screen, GLASS, (rect.x + 10, rect.y + 20, rect.w - 20, 30))
+
+    # sign
+    font = pygame.font.SysFont(None, 20)
+    text = font.render("STORE A", True, (0, 0, 0))
+    screen.blit(text, (rect.x + 25, rect.y + 5))
+
+# ---------------- ITEMS INSIDE STORE ----------------
+def draw_items():
+    rect = store_rect()
+
+    for i, item in enumerate(ITEMS):
+        cx = rect.x + 20 + i * 30
+        cy = rect.y + 50
+
+        if item["shape"] == "rect":
+            pygame.draw.rect(screen, item["color"], (cx, cy, 10, 10))
+        elif item["shape"] == "circle":
+            pygame.draw.circle(screen, item["color"], (cx + 5, cy + 5), 5)
+        else:
+            pygame.draw.rect(screen, item["color"], (cx, cy, 12, 12))
+
+# ---------------- CURRENT ITEM DISPLAY ----------------
+def draw_current_item():
+    if has_item:
+        return
+
+    rect = store_rect()
+    item = current_item
+
+    cx = rect.x + 55
+    cy = rect.y + 45
+
+    if item["shape"] == "rect":
+        pygame.draw.rect(screen, item["color"], (cx, cy, 8, 8))
+    elif item["shape"] == "circle":
+        pygame.draw.circle(screen, item["color"], (cx, cy), 5)
+    else:
+        pygame.draw.rect(screen, item["color"], (cx, cy, 10, 10))
+
+# ---------------- ROBOT ----------------
+def draw_robot():
+    rr = robot_rect()
+
+    pygame.draw.rect(screen, ROBOT, rr, border_radius=5)
+
+    # eyes
+    pygame.draw.circle(screen, (255, 255, 255), (rr.x + 6, rr.y + 6), 2)
+    pygame.draw.circle(screen, (255, 255, 255), (rr.x + 15, rr.y + 6), 2)
+
+    # wheels
+    pygame.draw.circle(screen, (0, 0, 0), (rr.x + 5, rr.y + 22), 3)
+    pygame.draw.circle(screen, (0, 0, 0), (rr.x + 17, rr.y + 22), 3)
+
+    if has_item:
+        pygame.draw.circle(screen, (255, 215, 0), (rr.x + 11, rr.y - 5), 4)
+
+    draw_sensors()
+
+# ---------------- WORLD ----------------
+def draw_world():
     screen.fill(GRASS)
 
-    # road
     pygame.draw.rect(screen, ROAD, (ROAD_X, 0, ROAD_W, HEIGHT))
+
     for i in range(0, HEIGHT, 25):
-        pygame.draw.rect(screen, LANES, (ROAD_X + 48, i, 4, 10))
+        pygame.draw.rect(screen, LANE, (ROAD_X + 48, i, 4, 10))
 
-    # shop
-    pygame.draw.rect(screen, SHOP, (shop[0], shop[1], 60, 40))
-
-    # goal
-    pygame.draw.circle(screen, GOAL_COLOR, goal, 15)
-
-    # cars
+def draw_cars():
     for c in cars:
-        pygame.draw.rect(screen, CAR_COLOR, c)
+        pygame.draw.rect(screen, c["color"], (c["x"], c["y"], 35, 18), border_radius=4)
 
-    # robot
+def draw_goal():
+    pygame.draw.circle(screen, GOAL_COLOR, goal, 16)
+    pygame.draw.circle(screen, (255, 255, 255), goal, 6)
+
+# ---------------- MAIN LOOP ----------------
+running = True
+
+while running:
+    clock.tick(60)
+
+    move_cars()
+
+    # ---------------- AI LOGIC (SIMPLE) ----------------
+    if not has_item:
+        target = (store_x + STORE_W // 2, store_y + STORE_H // 2)
+    else:
+        target = goal
+
+    move_robot(target)
+
     rr = robot_rect()
-    pygame.draw.rect(screen, ROBOT_COLOR, rr, border_radius=4)
 
-    # sensors (small)
-    sx, sy = int(x + 10), int(y + 10)
-    for angle in [-20, 0, 20]:
-        ex = sx + angle
-        ey = sy - 25
-        pygame.draw.line(screen, SENSOR, (sx, sy), (ex, ey), 1)
-        pygame.draw.circle(screen, SENSOR, (ex, ey), 2)
+    # pickup item
+    if rr.colliderect(store_rect()) and not has_item:
+        has_item = True
+        current_item = random.choice(ITEMS)
+        print("Picked:", current_item["name"])
 
-# ---------------- MAIN TRAIN LOOP ----------------
-for episode in range(300):
+    # delivery
+    if rr.colliderect(pygame.Rect(goal[0]-15, goal[1]-15, 30, 30)) and has_item:
+        print("Delivered:", current_item["name"])
+        has_item = False
+        x, y = 60, 60
 
-    x, y = 60, 60
-    has_item = False
+    # crash reset
+    if car_collision():
+        print("CRASH!")
+        has_item = False
+        x, y = 60, 60
 
-    for step in range(200):
+    # events
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                exit()
+    # ---------------- DRAW ----------------
+    draw_world()
+    draw_store()
+    draw_items()
+    draw_current_item()
+    draw_goal()
+    draw_cars()
+    draw_robot()
 
-        state = get_state()
-        action = act(state)
-
-        move(action)
-
-        crash = crash_check()
-
-        # pickup
-        if abs(x - shop[0]) < 25 and abs(y - shop[1]) < 25:
-            has_item = True
-
-        # goal
-        done = has_item and abs(x - goal[0]) < 25 and abs(y - goal[1]) < 25
-
-        next_state = get_state()
-        r = reward(crash, has_item and not done, done)
-
-        train(state, action, r, next_state)
-
-        if crash:
-            x, y = 60, 60
-
-        draw()
-        pygame.display.update()
-        clock.tick(30)
-
-        if done:
-            break
+    pygame.display.update()
 
 pygame.quit()
